@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 from requests import Session
-from typing import Dict
+from typing import Dict, Any
 from bs4 import BeautifulSoup
+import re
 
 
 class MoodleSession:
@@ -33,9 +34,9 @@ class MoodleSession:
             "Password": password,
             "AuthMethod": "FormsAuthentication"
         })
-        response = self.session.post(
-                MoodleSession.URL_SECOND_POST,
-                data=self.__parse_data_for_second_post())
+        self.session.post(
+            MoodleSession.URL_SECOND_POST,
+            data=self.__parse_data_for_second_post())
 
     def __parse_data_for_second_post(self) -> Dict[str, str]:
         data = self.session.get(MoodleSession.URL_DASHBOARD).text
@@ -46,11 +47,39 @@ class MoodleSession:
             'RelayState': MoodleSession.URL_HOME_PAGE
         }
 
+    @staticmethod
+    def __get_course_title(element) -> str:
+        COURSE_CODE = re.compile(r'^\w{4}-\d{3}')
+        # COURSE_CODE = re.compile(r'.*')
+        found = element.find_all('span', text=COURSE_CODE)
+        if len(found) < 1:
+            return None
+        return found[0].text
+
+    def get_courses(self) -> Dict[str, Any]:
+        COURSE_URL_PATTERN = re.compile(r'.*/view\.php\?id=\d+')
+        dashboard = self.session.get(MoodleSession.URL_DASHBOARD)
+        soup = BeautifulSoup(dashboard.text, 'html.parser')
+        found = soup.find_all('a', {'href': COURSE_URL_PATTERN})
+        filter_course_titles = (
+            (element, element['href'], MoodleSession.__get_course_title(element))
+            for element in found
+        )
+        filter_remove_non_courses = (
+            element
+            for element in filter_course_titles
+            if element[2] is not None and isinstance(element[2], str)
+        )
+        generate_return_dict = {
+            course: link
+            for (_, link, course) in filter_remove_non_courses
+        }
+        print(generate_return_dict)
+
 
 def main() -> None:
-    moodle = MoodleSession("J_DOE", "MyPassword123")
-    got = moodle.session.get("https://moodle.concordia.ca/moodle/course/view.php?id=134469")
-    print(got.text)
+    moodle = MoodleSession("username", "password")
+    moodle.get_courses()
 
 
 if __name__ == "__main__":
