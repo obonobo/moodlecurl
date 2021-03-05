@@ -1,10 +1,26 @@
 #!/usr/bin/env python3
 
 from requests import Session
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Generator, Callable
 from bs4 import BeautifulSoup
 import re
 import asyncio
+import os
+
+
+class Decorators:
+
+    @staticmethod
+    def tolist(
+            gen_func: Callable[..., Generator[Any, None, None]]
+            ) -> Callable[..., List[Any]]:
+        return lambda *a, **ka: list(gen_func(*a, **ka))
+
+    @staticmethod
+    def totask(
+            async_func: Callable[..., asyncio.coroutine]
+            ) -> Callable[..., asyncio.Task]:
+        return lambda *a, **ka: asyncio.create_task(async_func(*a, **ka))
 
 
 class Resource:
@@ -14,7 +30,6 @@ class Resource:
     def __init__(self, url, session = Session()):
         self.__url = url
         self.__name = None
-        self.__file = None
         self.__response = None
         self.__session = session
 
@@ -40,16 +55,35 @@ class Resource:
             self.__file = ''
         return self.__file
 
-    def download(self, filename: str = None) -> asyncio.Task:
-        return asyncio.create_task(self.__download_file(filename))
+    @Decorators.totask
+    async def download(
+            self,
+            prefix_dir: str = None,
+            filename: str = None) -> int:
 
-    async def __download_file(self, filename: str) -> None:
-        if not filename:
-            filename = self.name
-        with open(filename, 'wb') as fd:
+        save_as = filename if filename else self.name
+
+        if prefix_dir:
+            Resource.__create_dir_if_not_exists(prefix_dir)
+            save_as = os.path.join(prefix_dir, save_as)
+
+        bytes_saved = 0
+        with open(save_as, 'wb') as fd:
             for chunk in self.response.iter_content(chunk_size=1024*1024*5):
                 if (chunk):
                     fd.write(chunk)
+                    bytes_saved += len(chunk)
+
+        return bytes_saved
+
+    @staticmethod
+    def __create_dir_if_not_exists(dir: str) -> None:
+        if not os.path.exists(dir):
+            try:
+                os.makedirs(dir)
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise
 
     def __parse_file_name_from_headers(self) -> str:
         filename_pattern = re.compile(r'(?<=filename=").*(?=")')
@@ -99,22 +133,17 @@ class Course:
             self.__resource_list = self.__find_all_resources()
         return self.__resource_list
 
-    def _to_list(func):
-        return lambda self: list(func(self))
-
     def _to_resources(func):
         return lambda self: (
             Resource(url=href, session=self.session)
-            for href in func(self)
-        )
+            for href in func(self))
 
-    @_to_list
+    @Decorators.tolist
     @_to_resources
     def __find_all_resources(self):
         return (
             a['href'] for a in
-            self.soup.find_all('a', {'href': Course.RESOURCE_URL_PATTERN})
-        )
+            self.soup.find_all('a', {'href': Course.RESOURCE_URL_PATTERN}))
 
     def get_all_pdfs(self):
         pass
@@ -202,23 +231,26 @@ class MoodleSession:
             return None
         return found[0].text
 
+    def _remove_non_courses(gen):
+        return lambda self: (
+            element
+            for element in gen(self)
+            if element[2] is not None and isinstance(element[2], str))
+
+    def _generate_courses(gen):
+        return lambda self: (
+            Course(name=course, url=link, session=self.__session)
+            for (_, link, course) in gen(self))
+
+    @Decorators.tolist
+    @_generate_courses
+    @_remove_non_courses
     def __get_courses(self) -> List[Course]:
         COURSE_URL_PATTERN = re.compile(r'.*/view\.php\?id=\d+')
         found = self.dashboard.soup.find_all('a', {'href': COURSE_URL_PATTERN})
-        filter_course_titles = (
+        return (
             (element, element['href'], MoodleSession.__get_course_title(element))
             for element in found)
-
-        filter_remove_non_courses = (
-            element
-            for element in filter_course_titles
-            if element[2] is not None and isinstance(element[2], str))
-
-        generate_courses = (
-            Course(name=course, url=link, session=self.__session)
-            for (_, link, course) in filter_remove_non_courses)
-
-        return list(generate_courses)
 
     def __str__(self):
         return f'Moodle session for user: {self.username}'
@@ -227,21 +259,24 @@ class MoodleSession:
 async def main() -> None:
     moodle = MoodleSession("", "")
     print(moodle.courses)
+
     soen363 = next(
         c for c in moodle.courses
-        if c.name.lower().startswith('soen-363')
-    )
+        if c.name.lower().startswith('soen-363'))
+
     resources = soen363.resources
     print(resources)
     print(len(resources))
 
-    def download(r):
+    def download(r, *args, **kwargs):
         print(f"Downloading {r.name}...")
-        return r.download()
+        return r.download(*args, **kwargs)
 
-    asyncio.gather(*(download(r) for r in resources))
+    count = await download(resources[0], prefix_dir='downloads')
+    print(f'Finished downloading {count} bytes...')
 
-    print(f"Finished downloading {len(resources)} files...")
+    # asyncio.gather(*(download(r) for r in resources))
+    # print(f"Finished downloading {len(resources)} files...")
 
 
 if __name__ == "__main__":
