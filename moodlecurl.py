@@ -4,6 +4,7 @@ from requests import Session
 from typing import Dict, Any, List
 from bs4 import BeautifulSoup
 import re
+import asyncio
 
 
 class Resource:
@@ -14,7 +15,7 @@ class Resource:
         self.__url = url
         self.__name = None
         self.__file = None
-        self.__request = None
+        self.__response = None
         self.__session = session
 
     @property
@@ -24,14 +25,14 @@ class Resource:
     @property
     def name(self):
         if not self.__name:
-            self.__name = ''
+            self.__name = self.__parse_file_name_from_headers()
         return self.__name
 
     @property
-    def request(self):
-        if not self.__request:
-            self.__request = self.__session.get(self.url)
-        return self.__request
+    def response(self):
+        if not self.__response:
+            self.__response = self.__session.get(self.url)
+        return self.__response
 
     @property
     def file(self):
@@ -39,7 +40,24 @@ class Resource:
             self.__file = ''
         return self.__file
 
-    def __repr__(self):
+    def download(self, filename: str = None) -> asyncio.Task:
+        return asyncio.create_task(self.__download_file(filename))
+
+    async def __download_file(self, filename: str) -> None:
+        if not filename:
+            filename = self.name
+        with open(filename, 'wb') as fd:
+            for chunk in self.response.iter_content(chunk_size=1024*1024*5):
+                if (chunk):
+                    fd.write(chunk)
+
+    def __parse_file_name_from_headers(self) -> str:
+        filename_pattern = re.compile(r'(?<=filename=").*(?=")')
+        content_disposition = self.response.headers['Content-Disposition']
+        found = filename_pattern.findall(content_disposition)
+        return found[0] if len(found) > 0 else None
+
+    def __repr__(self) -> str:
         return f"Resource(url={self.url})"
 
 
@@ -84,7 +102,14 @@ class Course:
     def _to_list(func):
         return lambda self: list(func(self))
 
+    def _to_resources(func):
+        return lambda self: (
+            Resource(url=href, session=self.session)
+            for href in func(self)
+        )
+
     @_to_list
+    @_to_resources
     def __find_all_resources(self):
         return (
             a['href'] for a in
@@ -199,7 +224,7 @@ class MoodleSession:
         return f'Moodle session for user: {self.username}'
 
 
-def main() -> None:
+async def main() -> None:
     moodle = MoodleSession("", "")
     print(moodle.courses)
     soen363 = next(
@@ -208,11 +233,16 @@ def main() -> None:
     )
     resources = soen363.resources
     print(resources)
+    print(len(resources))
 
-    resource = Resource(url=soen363.resources[0], session=moodle.session)
-    print(resource)
-    print(resource.request.headers)
+    def download(r):
+        print(f"Downloading {r.name}...")
+        return r.download()
+
+    asyncio.gather(*(download(r) for r in resources))
+
+    print(f"Finished downloading {len(resources)} files...")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
