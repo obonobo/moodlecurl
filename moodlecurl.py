@@ -56,29 +56,28 @@ class MoodleSession:
             return None
         return found[0].text
 
-    def get_courses(self) -> Dict[str, Any]:
+    def get_courses(self) -> Dict[str, str]:
         COURSE_URL_PATTERN = re.compile(r'.*/view\.php\?id=\d+')
         dashboard = self.session.get(MoodleSession.URL_DASHBOARD)
         soup = BeautifulSoup(dashboard.text, 'html.parser')
         found = soup.find_all('a', {'href': COURSE_URL_PATTERN})
+
         filter_course_titles = (
             (element, element['href'], MoodleSession.__get_course_title(element))
-            for element in found
-        )
+            for element in found)
         filter_remove_non_courses = (
             element
             for element in filter_course_titles
-            if element[2] is not None and isinstance(element[2], str)
-        )
-        generate_return_dict = {
-            course: link
-            for (_, link, course) in filter_remove_non_courses
-        }
-        print(generate_return_dict)
+            if element[2] is not None and isinstance(element[2], str))
+        generate_return_dict = (
+            (course, link)
+            for (_, link, course) in filter_remove_non_courses)
+
+        print(dict(generate_return_dict))
 
 
 def main() -> None:
-    moodle = MoodleSession("username", "password")
+    # REMOVED
     moodle.get_courses()
 
 
