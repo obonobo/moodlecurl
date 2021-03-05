@@ -1,9 +1,104 @@
 #!/usr/bin/env python3
 
 from requests import Session
-from typing import Dict, Any
+from typing import Dict, Any, List
 from bs4 import BeautifulSoup
 import re
+
+
+class Resource:
+    """Represents a document resource available on the page of a course
+    """
+
+    def __init__(self, url, session = Session()):
+        self.__url = url
+        self.__name = None
+        self.__file = None
+        self.__request = None
+        self.__session = session
+
+    @property
+    def url(self):
+        return self.__url
+
+    @property
+    def name(self):
+        if not self.__name:
+            self.__name = ''
+        return self.__name
+
+    @property
+    def request(self):
+        if not self.__request:
+            self.__request = self.__session.get(self.url)
+        return self.__request
+
+    @property
+    def file(self):
+        if not self.__file:
+            self.__file = ''
+        return self.__file
+
+    def __repr__(self):
+        return f"Resource(url={self.url})"
+
+
+class Course:
+    """Represents a Concordia Moodle course
+    """
+
+    RESOURCE_URL_PATTERN = re.compile(r'.*/moodle/mod/resource/view\.php\?id=\d+')
+    COURSE_URL_PATTERN = re.compile(r'.*/view\.php\?id=\d+')
+
+    def __init__(self, name='', url='', session = Session()):
+        self.__name = name
+        self.__url = url
+        self.__session = session
+        self.__soup = None
+        self.__resource_list = None
+
+    @property
+    def name(self):
+        return self.__name
+
+    @property
+    def url(self):
+        return self.__url
+
+    @property
+    def session(self):
+        return self.__session
+
+    @property
+    def soup(self):
+        if not self.__soup:
+            self.__soup = BeautifulSoup(self.session.get(self.url).text, 'html.parser')
+        return self.__soup
+
+    @property
+    def resources(self):
+        if not self.__resource_list:
+            self.__resource_list = self.__find_all_resources()
+        return self.__resource_list
+
+    def _to_list(func):
+        return lambda self: list(func(self))
+
+    @_to_list
+    def __find_all_resources(self):
+        return (
+            a['href'] for a in
+            self.soup.find_all('a', {'href': Course.RESOURCE_URL_PATTERN})
+        )
+
+    def get_all_pdfs(self):
+        pass
+
+    def __repr__(self):
+        return f"Course(name={self.name}, url={self.url})"
+
+    def __str__(self):
+        return f"{self.name}: {self.url}"
 
 
 class MoodleSession:
@@ -15,9 +110,24 @@ class MoodleSession:
     URL_DASHBOARD = f"{URL_HOME_PAGE}my/"
     URL_SECOND_POST = "https://moodle.concordia.ca:443/moodle/auth/saml2/sp/saml2-acs.php/moodle.concordia.ca"
 
+    class Dashboard:
+        def __init__(self, text):
+            self.__text = text
+            self.__soup = BeautifulSoup(text, 'html.parser')
+
+        @property
+        def text(self):
+            return self.__text
+
+        @property
+        def soup(self):
+            return self.__soup
+
     def __init__(self, username: str, password: str):
        self.__session = Session()
        self.__username = username
+       self.__dashboard = None
+       self.__courses = None
        self.__login(password)
 
     @property
@@ -27,6 +137,19 @@ class MoodleSession:
     @property
     def session(self) -> Session:
         return self.__session
+
+    @property
+    def courses(self):
+        if not self.__courses:
+            self.__courses = self.__get_courses()
+        return self.__courses
+
+    @property
+    def dashboard(self):
+        if not self.__dashboard:
+            got = self.session.get(MoodleSession.URL_DASHBOARD)
+            self.__dashboard = MoodleSession.Dashboard(got.text)
+        return self.__dashboard
 
     def __login(self, password: str) -> None:
         self.session.post(MoodleSession.URL_FAS_SAML, data={
@@ -39,9 +162,8 @@ class MoodleSession:
             data=self.__parse_data_for_second_post())
 
     def __parse_data_for_second_post(self) -> Dict[str, str]:
-        data = self.session.get(MoodleSession.URL_DASHBOARD).text
-        soup = BeautifulSoup(data, 'html.parser')
-        inputs = soup.find_all('input')
+        got = self.session.get(MoodleSession.URL_DASHBOARD)
+        inputs = BeautifulSoup(got.text, 'html.parser').find_all('input')
         return {
             'SAMLResponse': inputs[0].get("value"),
             'RelayState': MoodleSession.URL_HOME_PAGE
@@ -50,35 +172,46 @@ class MoodleSession:
     @staticmethod
     def __get_course_title(element) -> str:
         COURSE_CODE = re.compile(r'^\w{4}-\d{3}')
-        # COURSE_CODE = re.compile(r'.*')
         found = element.find_all('span', text=COURSE_CODE)
         if len(found) < 1:
             return None
         return found[0].text
 
-    def get_courses(self) -> Dict[str, str]:
+    def __get_courses(self) -> List[Course]:
         COURSE_URL_PATTERN = re.compile(r'.*/view\.php\?id=\d+')
-        dashboard = self.session.get(MoodleSession.URL_DASHBOARD)
-        soup = BeautifulSoup(dashboard.text, 'html.parser')
-        found = soup.find_all('a', {'href': COURSE_URL_PATTERN})
-
+        found = self.dashboard.soup.find_all('a', {'href': COURSE_URL_PATTERN})
         filter_course_titles = (
             (element, element['href'], MoodleSession.__get_course_title(element))
             for element in found)
+
         filter_remove_non_courses = (
             element
             for element in filter_course_titles
             if element[2] is not None and isinstance(element[2], str))
-        generate_return_dict = (
-            (course, link)
+
+        generate_courses = (
+            Course(name=course, url=link, session=self.__session)
             for (_, link, course) in filter_remove_non_courses)
 
-        print(dict(generate_return_dict))
+        return list(generate_courses)
+
+    def __str__(self):
+        return f'Moodle session for user: {self.username}'
 
 
 def main() -> None:
-    # REMOVED
-    moodle.get_courses()
+    moodle = MoodleSession("", "")
+    print(moodle.courses)
+    soen363 = next(
+        c for c in moodle.courses
+        if c.name.lower().startswith('soen-363')
+    )
+    resources = soen363.resources
+    print(resources)
+
+    resource = Resource(url=soen363.resources[0], session=moodle.session)
+    print(resource)
+    print(resource.request.headers)
 
 
 if __name__ == "__main__":
