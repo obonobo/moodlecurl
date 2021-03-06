@@ -6,6 +6,101 @@ from bs4 import BeautifulSoup
 import re
 import asyncio
 import os
+import ArgumentParser, Namespace from argparse
+import sys
+
+
+class CLI:
+
+    ARG_DESCRIPTIONS = {
+        'main': {
+            'description': "Authenticated CLI access to Concordia's "
+                           "online Moodle portal",
+            'args': [
+                {
+
+                    'name': ['-u', '--username'],
+                    'help': 'Username for logging into Moodle',
+                },
+                {
+                    'name': ['-p', '--password'],
+                    'help': 'Password for logging into Moodle'
+                },
+                {
+                    'name': ['--password-stdin'],
+                    'action': 'store_true',
+                    'default': False,
+                    'help': 'Take the password from stdin'
+                }
+            ]
+        },
+        'course': {
+            'description': "Perform an operation on a specific course",
+            'args': [
+                {
+                    'name': ['']
+                }
+            ]
+        },
+        'resources': {
+            'description': "Access resources (files) for a course on Moodle",
+            'args': [
+                {
+                    'name': ['-c', '--course'],
+                    'help': 'Course ID for to search'
+                }
+            ]
+        }
+    }
+
+    class Parser:
+        def __init__(
+                self,
+                command: str = sys.argv[0],
+                parent_parser: ArgumentParser = None,
+                description: str = None,
+                args: List[Dict[str, Any]] = []):
+
+            def init_parser(call_me):
+                self.__parser = call_me(prog=command, description=description)
+
+            if not parent_parser:
+                init_parser(ArgumentParser)
+            else:
+                init_parser(parent_parser.add_subparsers().add_parser)
+
+            self.__init_args(args)
+
+        @property
+        def parser(self) -> ArgumentParser:
+            return self.__parser
+
+        def __init_args(self, args: List[Dict[str, Any]]) -> None:
+            for arg in args:
+                self.parser.add_argument(**arg)
+
+    def __init__(self):
+        self.__main_parser = Parser(**ARG_DESCRIPTIONS['main'])
+
+        self.__resources_parser = Parser(
+            parent_parser=self.parser,
+            command='resources',
+            **ARG_DESCRIPTIONS['resources'])
+
+        self.__parsed_args = None
+
+    @property
+    def parser(self) -> ArgumentParser:
+        return self.__main_parser
+
+    @property
+    def args(self) -> Namespace:
+        if not self.__parsed_args:
+            self.__parsed_args = self.parser.parse_args()
+        return self.__parsed_args
+
+    def __repr__(self) -> str:
+        return repr(self.parser)
 
 
 class Decorators:
@@ -280,4 +375,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    cli = CLI()
+    print(cli.args)
+    # asyncio.run(main())
