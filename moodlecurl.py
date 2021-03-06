@@ -6,11 +6,11 @@ from bs4 import BeautifulSoup
 import re
 import asyncio
 import os
-import ArgumentParser, Namespace from argparse
+from argparse import ArgumentParser, Namespace
 import sys
 
 
-class CLI:
+class Cli:
 
     ARG_DESCRIPTIONS = {
         'main': {
@@ -19,15 +19,18 @@ class CLI:
             'args': [
                 {
 
-                    'name': ['-u', '--username'],
+                    'flags': ['-u', '--username'],
+                    'dest': 'username',
                     'help': 'Username for logging into Moodle',
                 },
                 {
-                    'name': ['-p', '--password'],
+                    'flags': ['-p', '--password'],
+                    'dest': 'password',
                     'help': 'Password for logging into Moodle'
                 },
                 {
-                    'name': ['--password-stdin'],
+                    'flags': ['--password-stdin'],
+                    'dest': 'password_stdin',
                     'action': 'store_true',
                     'default': False,
                     'help': 'Take the password from stdin'
@@ -46,7 +49,8 @@ class CLI:
             'description': "Access resources (files) for a course on Moodle",
             'args': [
                 {
-                    'name': ['-c', '--course'],
+                    'flags': ['-c', '--course'],
+                    'dest': 'course',
                     'help': 'Course ID for to search'
                 }
             ]
@@ -62,7 +66,7 @@ class CLI:
                 args: List[Dict[str, Any]] = []):
 
             def init_parser(call_me):
-                self.__parser = call_me(prog=command, description=description)
+                self.__parser = call_me(command, description=description)
 
             if not parent_parser:
                 init_parser(ArgumentParser)
@@ -77,15 +81,16 @@ class CLI:
 
         def __init_args(self, args: List[Dict[str, Any]]) -> None:
             for arg in args:
-                self.parser.add_argument(**arg)
+                (_, flags), *rest = arg.items()
+                self.parser.add_argument(*flags, **dict(rest))
 
     def __init__(self):
-        self.__main_parser = Parser(**ARG_DESCRIPTIONS['main'])
+        self.__main_parser = Cli.Parser(**Cli.ARG_DESCRIPTIONS['main']).parser
 
-        self.__resources_parser = Parser(
+        self.__resources_parser = Cli.Parser(
             parent_parser=self.parser,
             command='resources',
-            **ARG_DESCRIPTIONS['resources'])
+            **Cli.ARG_DESCRIPTIONS['resources']).parser
 
         self.__parsed_args = None
 
@@ -375,6 +380,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    cli = CLI()
+    cli = Cli()
     print(cli.args)
     # asyncio.run(main())
