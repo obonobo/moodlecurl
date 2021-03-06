@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from requests import Session
-from typing import Dict, Any, List, Generator, Callable
+from typing import Dict, Any, List, Generator, Callable, Tuple
 from bs4 import BeautifulSoup
 import re
 import asyncio
@@ -20,38 +20,41 @@ class Cli:
                 {
 
                     'flags': ['-u', '--username'],
+                    'metavar': 'USERNAME',
                     'dest': 'username',
-                    'help': 'Username for logging into Moodle',
+                    'help': 'username for logging into Moodle',
                 },
                 {
                     'flags': ['-p', '--password'],
+                    'metavar': 'PASSWORD',
                     'dest': 'password',
-                    'help': 'Password for logging into Moodle'
+                    'help': 'password for logging into Moodle'
                 },
                 {
                     'flags': ['--password-stdin'],
                     'dest': 'password_stdin',
                     'action': 'store_true',
                     'default': False,
-                    'help': 'Take the password from stdin'
+                    'help': 'take the password from stdin'
                 }
             ]
         },
-        'course': {
-            'description': "Perform an operation on a specific course",
-            'args': [
-                {
-                    'name': ['']
-                }
-            ]
-        },
+#       'course': {
+#           'description': "Perform an operation on a specific course",
+#           'args': [
+#               {
+#                   'name': ['-f']
+#               }
+#           ]
+#       },
         'resources': {
             'description': "Access resources (files) for a course on Moodle",
             'args': [
                 {
                     'flags': ['-c', '--course'],
                     'dest': 'course',
-                    'help': 'Course ID for to search'
+                    'metavar': 'ABCD-123',
+                    'help': 'course ID for to search (e.g.: SOEN-341)'
                 }
             ]
         }
@@ -60,13 +63,14 @@ class Cli:
     class Parser:
         def __init__(
                 self,
-                command: str = sys.argv[0],
+                command: str = os.path.basename(sys.argv[0]),
                 parent_parser: ArgumentParser = None,
                 description: str = None,
-                args: List[Dict[str, Any]] = []):
+                args: List[Dict[str, Any]] = [],
+                **kwargs):
 
             def init_parser(call_me):
-                self.__parser = call_me(command, description=description)
+                self.__parser = call_me(command, description=description, **kwargs)
 
             if not parent_parser:
                 init_parser(ArgumentParser)
@@ -85,18 +89,29 @@ class Cli:
                 self.parser.add_argument(*flags, **dict(rest))
 
     def __init__(self):
-        self.__main_parser = Cli.Parser(**Cli.ARG_DESCRIPTIONS['main']).parser
-
-        self.__resources_parser = Cli.Parser(
-            parent_parser=self.parser,
-            command='resources',
-            **Cli.ARG_DESCRIPTIONS['resources']).parser
-
+        (_, main_description), *rest = Cli.ARG_DESCRIPTIONS.items()
+        self.__main_parser = Cli.Parser(**main_description)
+        self.__subparsers: Dict[str, Cli.Parser] = {}
+        self.__init_subparsers(*rest)
         self.__parsed_args = None
+
+    def __init_subparsers(self, *arg_descriptions: Tuple[str, Dict[str, Any]]) -> None:
+        for description in arg_descriptions:
+            self.__init_subparser(description)
+
+    def __init_subparser(self, arg_description: Tuple[str, Dict[str, Any]]) -> None:
+        self.__subparsers[arg_description[0]] = Cli.Parser(
+            parent_parser=self.parser,
+            command=arg_description[0],
+            **arg_description[1])
 
     @property
     def parser(self) -> ArgumentParser:
-        return self.__main_parser
+        return self.__main_parser.parser
+
+    @property
+    def get_subparser(self, name: str) -> ArgumentParser:
+        return self.__subparsers[name].parser
 
     @property
     def args(self) -> Namespace:
